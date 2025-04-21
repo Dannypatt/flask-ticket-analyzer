@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Procesando Archivo...</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; text-align: center; }
+        .container { max-width: 600px; margin: 50px auto; background: #f9f9f9; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { color: #333; }
+        #status { margin-top: 20px; font-size: 1.1em; }
+        #progress-bar-container { width: 80%; margin: 20px auto; background-color: #e0e0e0; border-radius: 4px; }
+        #progress-bar { width: 0%; height: 20px; background-color: #007bff; border-radius: 4px; text-align: center; line-height: 20px; color: white; transition: width 0.5s ease-in-out; }
+        #download-link { margin-top: 20px; display: none; } /* Oculto inicialmente */
+        #error-message { margin-top: 20px; color: red; display: none; font-weight: bold; }
+        #stats { margin-top: 15px; font-size: 0.9em; color: #555; text-align: left; padding: 10px; border-top: 1px solid #ddd;}
+        .loader { border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Procesando tu archivo...</h1>
+        <div id="loader" class="loader"></div>
+        <div id="status">Iniciando...</div>
+        <div id="progress-bar-container">
+            <div id="progress-bar">0%</div>
+        </div>
+        <div id="error-message"></div>
+        <div id="stats" style="display: none;"> <!-- Oculto inicialmente -->
+            <h3>Estadísticas:</h3>
+            <p>Tiempo transcurrido: <span id="time-elapsed">0</span>s</p>
+            <p>Errores Resumen: <span id="summary-errors">0</span></p>
+            <p>Errores Clasificación: <span id="classification-errors">0</span></p>
+        </div>
+        <div id="download-link">
+             <!-- El enlace se añadirá aquí -->
+        </div>
+    </div>
+
+    <script>
+        const taskId = "{{ task_id }}";
+        const statusElement = document.getElementById('status');
+        const progressBar = document.getElementById('progress-bar');
+        const downloadLinkContainer = document.getElementById('download-link');
+        const errorMessageElement = document.getElementById('error-message');
+        const loader = document.getElementById('loader');
+        const statsContainer = document.getElementById('stats');
+        const timeElapsedSpan = document.getElementById('time-elapsed');
+        const summaryErrorsSpan = document.getElementById('summary-errors');
+        const classificationErrorsSpan = document.getElementById('classification-errors');
+
+        function checkStatus() {
+            fetch(`/status/${taskId}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`Error de red o servidor: ${response.statusText}`);
+                    }
+                    return response.json();
+                 })
+                .then(data => {
+                    console.log("Status data:", data); // Para depuración
+                    let progress = 0;
+                    if (data.total > 0) {
+                        progress = Math.round((data.progress / data.total) * 100);
+                    }
+                    statusElement.textContent = `Estado: ${data.status} (${data.progress}/${data.total})`;
+                    progressBar.style.width = progress + '%';
+                    progressBar.textContent = progress + '%';
+
+                    // Actualizar estadísticas
+                    if (data.time_elapsed !== undefined) timeElapsedSpan.textContent = data.time_elapsed.toFixed(1);
+                    if (data.summary_errors !== undefined) summaryErrorsSpan.textContent = data.summary_errors;
+                    if (data.classification_errors !== undefined) classificationErrorsSpan.textContent = data.classification_errors;
+
+
+                    if (data.status === 'completed') {
+                        clearInterval(intervalId); // Detener polling
+                        loader.style.display = 'none';
+                        statusElement.textContent = `Proceso completado (${data.progress}/${data.total}).`;
+                        downloadLinkContainer.style.display = 'block';
+                        downloadLinkContainer.innerHTML = `<a href="/download/${data.result_file}" class="button" download>Descargar Archivo Procesado</a>`;
+                        statsContainer.style.display = 'block'; // Mostrar estadísticas al completar
+                    } else if (data.status === 'error') {
+                        clearInterval(intervalId);
+                        loader.style.display = 'none';
+                        statusElement.textContent = "Error durante el procesamiento.";
+                        errorMessageElement.textContent = `Error: ${data.error || 'Error desconocido'}`;
+                        errorMessageElement.style.display = 'block';
+                        statsContainer.style.display = 'block'; // Mostrar estadísticas aunque haya error
+                    } else if (data.status === 'cancelled') {
+                        clearInterval(intervalId);
+                        loader.style.display = 'none';
+                        statusElement.textContent = `Proceso cancelado por el usuario (${data.progress}/${data.total}).`;
+                        statsContainer.style.display = 'block';
+                    } else if (data.status === 'processing' || data.status === 'reading' || data.status === 'saving') {
+                         // Continuar polling
+                         statsContainer.style.display = 'block'; // Mostrar estadísticas mientras procesa
+                    }
+
+                })
+                .catch(error => {
+                    console.error('Error fetching status:', error);
+                    statusElement.textContent = "Error al conectar con el servidor para obtener estado.";
+                    errorMessageElement.textContent = `Error de conexión: ${error.message}`;
+                    errorMessageElement.style.display = 'block';
+                    loader.style.display = 'none';
+                    clearInterval(intervalId); // Detener si hay error de conexión
+                });
+        }
+
+        // Iniciar polling cada 3 segundos
+        const intervalId = setInterval(checkStatus, 3000);
+        // Llamar una vez inmediatamente
+        checkStatus();
+    </script>
+</body>
+</html>

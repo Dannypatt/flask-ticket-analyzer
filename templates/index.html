@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Analizador de Tickets IT</title>
+    <style>
+        /* ... (mismos estilos que antes) ... */
+        textarea { display: block; width: 95%; margin-bottom: 15px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: sans-serif; font-size: 0.95em; }
+        label { font-weight: bold; display: block; margin-bottom: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Analizador y Clasificador de Tickets IT</h1>
+
+        <div class="instructions">
+            <p>Sube tu archivo Excel (.xlsx). Debe contener las columnas requeridas (Number, Short description, Description, Work notes, etc.).</p>
+            <p>El sistema procesará los tickets usando el modelo <strong>{{ default_model }}</strong> para generar resúmenes y clasificaciones.</p>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="alert alert-{{ category }} error">{{ message }}</div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        <form method="post" enctype="multipart/form-data" action="{{ url_for('upload_and_process') }}">
+            <label for="excel_file">Selecciona el archivo Excel:</label>
+            <input type="file" name="excel_file" id="excel_file" accept=".xlsx" required>
+
+            <!-- NUEVO CAMPO DE CONTEXTO -->
+            <label for="user_context">Contexto Adicional (Opcional):</label>
+            <textarea name="user_context" id="user_context" rows="4" placeholder="Proporciona información relevante para mejorar la clasificación. Ej: Nombres de proyectos clave (Zeus, Atenea), Software interno (SISCONT, NOMINAWEB), Departamentos (Contabilidad, RRHH), Problemas comunes (VPN, SAP bloqueado)..."></textarea>
+            <!-- FIN NUEVO CAMPO -->
+
+            <button type="submit">Procesar Archivo</button>
+        </form>
+    </div>
+</body>
+</html>

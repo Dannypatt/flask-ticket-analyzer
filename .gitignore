@@ -1,0 +1,23 @@
+# Entorno Virtual (si usas uno)
+venv/
+.venv/
+env/
+*.env
+
+# Archivos de caché de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Carpetas de datos de ejecución (¡No subir archivos de usuarios!)
+uploads/
+processed/
+
+# Archivos específicos del SO
+.DS_Store
+Thumbs.db
+
+# Archivos de configuración sensibles (si los tuvieras)
+# config.ini
+# .secret

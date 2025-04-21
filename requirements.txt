@@ -1,0 +1,7 @@
+Flask
+pandas
+openpyxl
+beautifulsoup4
+ollama
+requests
+werkzeug >= 2.0 # Asegura compatibilidad con secure_filename
