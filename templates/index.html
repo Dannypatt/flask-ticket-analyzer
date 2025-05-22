@@ -1,43 +1,105 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <title>Analizador de Tickets IT</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analizador y Clasificador de Tickets IT</title>
     <style>
-        /* ... (mismos estilos que antes) ... */
-        textarea { display: block; width: 95%; margin-bottom: 15px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: sans-serif; font-size: 0.95em; }
-        label { font-weight: bold; display: block; margin-bottom: 5px; }
+        body { font-family: sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
+        .container { background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); max-width: 800px; margin: auto;}
+        h1, h2 { color: #333; }
+        label { display: block; margin-top: 10px; margin-bottom: 5px; font-weight: bold; }
+        input[type="file"], input[type="text"], select, textarea {
+            width: calc(100% - 22px); padding: 10px; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;
+        }
+        textarea { min-height: 80px; }
+        button {
+            background-color: #007bff; color: white; padding: 10px 15px; border: none;
+            border-radius: 4px; cursor: pointer; font-size: 16px; margin-right: 10px;
+        }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        .progress-bar-container {
+            width: 100%; background-color: #e0e0e0; border-radius: 4px; margin-top: 10px; display: none;
+        }
+        .progress-bar {
+            width: 0%; height: 20px; background-color: #4caf50; border-radius: 4px;
+            text-align: center; line-height: 20px; color: white; transition: width 0.3s ease;
+        }
+        .status-message, .download-link, .analysis-summary { margin-top: 15px; }
+        .error { color: red; font-weight: bold; }
+        .info { color: #0056b3; }
+        .config-section { border: 1px solid #eee; padding: 15px; margin-top:20px; border-radius: 5px; background: #f9f9f9;}
+        .config-section h3 { margin-top: 0; }
+        .ollama-status { padding: 10px; border-radius: 4px; margin-bottom: 15px; }
+        .ollama-ok { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .ollama-error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .button-group { margin-top: 10px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Analizador y Clasificador de Tickets IT</h1>
+        <h1>Analizador y Clasificador de Tickets IT con Flask y Ollama</h1>
+        <p>Sube un archivo Excel (.xlsx o .xls) con tickets de soporte para analizarlos y clasificarlos.</p>
 
-        <div class="instructions">
-            <p>Sube tu archivo Excel (.xlsx). Debe contener las columnas requeridas (Number, Short description, Description, Work notes, etc.).</p>
-            <p>El sistema procesará los tickets usando el modelo <strong>{{ default_model }}</strong> para generar resúmenes y clasificaciones.</p>
+        <div id="ollamaStatus" class="ollama-status {{ 'ollama-ok' if 'Disponible' in ollama_status else 'ollama-error' }}">
+            <strong>Estado de Ollama:</strong> {{ ollama_status }}
+            {% if ollama_models %}
+                <br>Modelos detectados: {{ ollama_models|join(', ') }}
+            {% endif %}
         </div>
 
-        {% with messages = get_flashed_messages(with_categories=true) %}
-          {% if messages %}
-            {% for category, message in messages %}
-              <div class="alert alert-{{ category }} error">{{ message }}</div>
-            {% endfor %}
-          {% endif %}
-        {% endwith %}
+        <form id="uploadForm">
+            <label for="file">Selecciona archivo Excel (.xlsx, .xls):</label>
+            <input type="file" id="file" name="file" accept=".xlsx,.xls" required>
 
-        <form method="post" enctype="multipart/form-data" action="{{ url_for('upload_and_process') }}">
-            <label for="excel_file">Selecciona el archivo Excel:</label>
-            <input type="file" name="excel_file" id="excel_file" accept=".xlsx" required>
+            <div class="config-section">
+                <h3>Configuración del Análisis</h3>
+                <label for="ollama_model_select">Modelo LLM a utilizar (Ollama):</label>
+                <select id="ollama_model_select" name="ollama_model_select">
+                    {% if ollama_models %}
+                        {% for model in ollama_models %}
+                            <option value="{{ model }}" {% if model == ollama_model_default %}selected{% endif %}>{{ model }}</option>
+                        {% endfor %}
+                         <option value="otro_modelo_personalizado">(Otro modelo - escribir abajo)</option>
+                    {% else %}
+                        <option value="{{ ollama_model_default }}" selected>{{ ollama_model_default }} (default - no se pudo listar)</option>
+                        <option value="otro_modelo_personalizado">(Otro modelo - escribir abajo)</option>
+                    {% endif %}
+                </select>
+                <input type="text" id="ollama_model_custom" name="ollama_model_custom" placeholder="Escribe aquí si seleccionaste 'Otro modelo'" style="display:none;">
 
-            <!-- NUEVO CAMPO DE CONTEXTO -->
-            <label for="user_context">Contexto Adicional (Opcional):</label>
-            <textarea name="user_context" id="user_context" rows="4" placeholder="Proporciona información relevante para mejorar la clasificación. Ej: Nombres de proyectos clave (Zeus, Atenea), Software interno (SISCONT, NOMINAWEB), Departamentos (Contabilidad, RRHH), Problemas comunes (VPN, SAP bloqueado)..."></textarea>
-            <!-- FIN NUEVO CAMPO -->
 
-            <button type="submit">Procesar Archivo</button>
+                <label for="custom_context">Contexto Personalizado (opcional, para mejorar análisis):</label>
+                <textarea id="custom_context" name="custom_context" placeholder="Ej: Nombres de proyectos internos (Zeus, Cronos), software específico (SAP, CRM Interno), departamentos (RRHH, Finanzas), problemas recurrentes conocidos (fallos impresora X, VPN lenta)..."></textarea>
+
+                <label for="description_column">Columna de Descripción Larga:</label>
+                <input type="text" id="description_column" name="description_column" value="{{ default_cols.description_column }}">
+
+                <label for="short_description_column">Columna de Descripción Corta:</label>
+                <input type="text" id="short_description_column" name="short_description_column" value="{{ default_cols.short_description_column }}">
+
+                <label for="work_notes_column">Columna de Notas de Trabajo:</label>
+                <input type="text" id="work_notes_column" name="work_notes_column" value="{{ default_cols.work_notes_column }}">
+                
+            </div>
+            <div class="button-group">
+                <button type="submit" id="uploadButton">1. Subir Archivo</button>
+                <button type="button" id="analyzeButton" style="display:none;" disabled>2. Analizar Tickets</button>
+            </div>
         </form>
+
+        <div id="progressArea" style="display:none;">
+            <h2>Progreso del Análisis</h2>
+            <div class="progress-bar-container">
+                <div id="progressBar" class="progress-bar">0%</div>
+            </div>
+            <p id="statusMessage" class="status-message"></p>
+            <div id="downloadLink" class="download-link"></div>
+            <div id="analysisSummary" class="analysis-summary"></div>
+        </div>
     </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

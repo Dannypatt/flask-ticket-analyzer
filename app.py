@@ -1,122 +1,212 @@
 # app.py
+from flask import Flask, request, jsonify, render_template, send_from_directory
 import os
 import uuid
 import threading
-import logging
-from flask import Flask, request, render_template, send_from_directory, jsonify, redirect, url_for, flash
-from werkzeug.utils import secure_filename
-from typing import Dict # Asegúrate que está importado
-from processing_logic import process_excel_file, check_model_exists, LLM_MODEL_GEMMA
-
-UPLOAD_FOLDER = 'uploads'
-PROCESSED_FOLDER = 'processed'
-ALLOWED_EXTENSIONS = {'xlsx'}
+import requests
+from processing_logic import process_excel_file, clean_old_files
+from config import (
+    UPLOAD_FOLDER, PROCESSED_FOLDER, OLLAMA_MODEL, DEFAULT_COLUMNS_TO_ANALYZE,
+    OLLAMA_BASE_URL
+)
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['PROCESSED_FOLDER'] = PROCESSED_FOLDER
-app.secret_key = os.urandom(24)
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
+
+tasks_status = {}
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 
-tasks_status: Dict[str, Dict] = {}
-tasks_lock = threading.Lock()
-cancel_events: Dict[str, threading.Event] = {}
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(threadName)s - %(message)s')
-
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
 @app.route('/', methods=['GET'])
 def index():
-    model_ok, model_name = check_model_exists(LLM_MODEL_GEMMA)
-    if not model_ok:
-        flash(f"ADVERTENCIA: Modelo '{LLM_MODEL_GEMMA}' no encontrado. El procesamiento fallará.", "warning")
-    default_model_name = model_name or LLM_MODEL_GEMMA
-    return render_template('index.html', default_model=default_model_name)
+    clean_old_files()
+    ollama_status = "No disponible"
+    ollama_models_available = []
+    try:
+        response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=10) # Aumentado un poco el timeout para la comprobación
+        if response.status_code == 200:
+            ollama_status = "Disponible"
+            models_data = response.json().get("models", [])
+            ollama_models_available = sorted([model['name'] for model in models_data])
+        else:
+            ollama_status = f"Error: {response.status_code} - {response.text[:200]}"
+    except requests.exceptions.RequestException as e:
+        ollama_status = f"No se pudo conectar a Ollama en {OLLAMA_BASE_URL}. Asegúrate que esté ejecutándose. Detalle: {str(e)[:200]}"
+
+    return render_template('index.html',
+                           ollama_model_default=OLLAMA_MODEL,
+                           default_cols=DEFAULT_COLUMNS_TO_ANALYZE,
+                           ollama_status=ollama_status,
+                           ollama_models=ollama_models_available)
+
 
 @app.route('/upload', methods=['POST'])
-def upload_and_process():
-    if 'excel_file' not in request.files:
-        flash('No se encontró parte del archivo', 'error')
-        return redirect(url_for('index'))
-    file = request.files['excel_file']
-    # --- NUEVO: Obtener contexto del formulario ---
-    user_context = request.form.get('user_context', '').strip() # .strip() para quitar espacios extra
-    # ----------------------------------------------
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({"error": "No se envió ningún archivo."}), 400
+    file = request.files['file']
     if file.filename == '':
-        flash('Ningún archivo seleccionado', 'error')
-        return redirect(url_for('index'))
+        return jsonify({"error": "No se seleccionó ningún archivo."}), 400
 
-    if file and allowed_file(file.filename):
-        model_ok, actual_model = check_model_exists(LLM_MODEL_GEMMA)
-        if not model_ok or not actual_model:
-             flash(f"ERROR CRÍTICO: Modelo '{LLM_MODEL_GEMMA}' no encontrado o inválido.", "error")
-             return redirect(url_for('index'))
+    if file and (file.filename.endswith('.xlsx') or file.filename.endswith('.xls')):
+        original_filename = file.filename
+        temp_filename_base = str(uuid.uuid4())
+        _, extension = os.path.splitext(original_filename)
+        temp_filename = temp_filename_base + extension
+        
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], temp_filename)
+        file.save(filepath)
 
-        original_filename = secure_filename(file.filename)
-        ext = os.path.splitext(original_filename)[1]
-        unique_id = str(uuid.uuid4())
-        input_filename = f"{unique_id}_input{ext}"
-        output_filename = f"{unique_id}_processed{ext}"
-        input_path = os.path.join(app.config['UPLOAD_FOLDER'], input_filename)
-        output_path = os.path.join(app.config['PROCESSED_FOLDER'], output_filename)
-
-        try:
-            file.save(input_path)
-            logging.info(f"Archivo subido: {input_path}")
-            if user_context:
-                 logging.info(f"Contexto proporcionado: '{user_context[:100]}...'") # Loguear inicio del contexto
-
-            task_id = unique_id
-            cancel_event = threading.Event()
-            with tasks_lock:
-                tasks_status[task_id] = {"status": "queued", "progress": 0, "total": 0, "error": None, "result_file": None}
-                cancel_events[task_id] = cancel_event
-
-            # --- MODIFICACIÓN: Pasar user_context a los args del hilo ---
-            thread = threading.Thread(
-                target=process_excel_file,
-                args=(input_path, output_path, actual_model, user_context, task_id, tasks_status, cancel_event), # <-- Añadido user_context
-                name=f"TaskThread_{task_id}",
-                daemon=True
-            )
-            # ------------------------------------------------------------
-            thread.start()
-            logging.info(f"Tarea {task_id} iniciada para {original_filename}")
-            return redirect(url_for('processing_page', task_id=task_id))
-
-        except Exception as e:
-            logging.error(f"Error al guardar o iniciar tarea: {e}", exc_info=True)
-            flash(f"Error al iniciar procesamiento: {e}", "error")
-            return redirect(url_for('index'))
+        task_id = str(uuid.uuid4())
+        tasks_status[task_id] = {
+            "status": "uploaded",
+            "message": "Archivo subido, listo para analizar.",
+            "original_filename": original_filename, 
+            "temp_filename_base": temp_filename_base,
+            "filepath_on_server": filepath,
+            "processed_filepath_on_server": None,
+            "progress_current": 0,
+            "progress_total": 1,
+            "analysis_summary": None
+        }
+        return jsonify({
+            "message": "Archivo subido exitosamente.",
+            "task_id": task_id,
+            "filename": original_filename
+        }), 200
     else:
-        flash('Tipo de archivo no permitido (.xlsx)', 'error')
-        return redirect(url_for('index'))
+        return jsonify({"error": "Formato de archivo no soportado. Por favor, suba un .xlsx o .xls."}), 400
 
-@app.route('/processing/<task_id>')
-def processing_page(task_id):
-    return render_template('processing.html', task_id=task_id)
 
-@app.route('/status/<task_id>')
-def task_status(task_id):
-    with tasks_lock:
-        status = tasks_status.get(task_id, {"status": "not_found", "error": "Tarea no encontrada"})
-    return jsonify(status)
+def analysis_thread_target(task_id, filepath_on_server, temp_filename_base, custom_context, selected_columns, ollama_model_to_use):
+    def update_progress_local(current, total, message, status_override=None):
+        task_data = tasks_status.get(task_id, {})
+        task_data["progress_current"] = current
+        task_data["progress_total"] = total
+        task_data["message"] = message
+        if status_override:
+             task_data["status"] = status_override
+        elif current == total and total > 0:
+            task_data["status"] = "completed"
+        else:
+            task_data["status"] = "processing"
+        tasks_status[task_id] = task_data
 
-@app.route('/download/<filename>')
-def download_file(filename):
-    safe_path = os.path.abspath(app.config['PROCESSED_FOLDER'])
-    requested_path = os.path.abspath(os.path.join(safe_path, filename))
-    if not requested_path.startswith(safe_path): return "Acceso denegado", 403
-    if not os.path.exists(requested_path): return "Archivo no encontrado", 404
-    logging.info(f"Descargando: {filename}")
-    try: return send_from_directory(app.config['PROCESSED_FOLDER'], filename, as_attachment=True)
-    except Exception as e: logging.error(f"Error descarga {filename}: {e}", exc_info=True); return "Error descarga", 500
+    try:
+        update_progress_local(0, 1, "Hilo de análisis iniciado, preparando...", "processing")
+        
+        processed_filepath_from_logic, analysis_summary_for_ui = process_excel_file(
+            filepath_on_server,
+            temp_filename_base,
+            custom_context,
+            selected_columns,
+            ollama_model_to_use,
+            update_progress_local
+        )
+        
+        tasks_status[task_id]["analysis_summary"] = analysis_summary_for_ui
+        if processed_filepath_from_logic:
+            tasks_status[task_id]["processed_filepath_on_server"] = processed_filepath_from_logic
+            if tasks_status[task_id]["status"] != "error":
+                update_progress_local(tasks_status[task_id]["progress_total"], tasks_status[task_id]["progress_total"], "Análisis finalizado. Resultados listos.", "completed")
+        else:
+            if tasks_status[task_id]["status"] != "error":
+                 update_progress_local(tasks_status[task_id]["progress_current"], tasks_status[task_id]["progress_total"], "El análisis falló al generar el archivo de salida. Revise logs.", "error")
+    except Exception as e:
+        print(f"Error CRÍTICO en el hilo de análisis para task_id {task_id}: {e}")
+        update_progress_local(
+            tasks_status.get(task_id, {}).get("progress_current", 0),
+            tasks_status.get(task_id, {}).get("progress_total", 1),
+            f"Error crítico no manejado en el hilo: {str(e)}", 
+            "error"
+        )
+        if tasks_status.get(task_id):
+            tasks_status[task_id]["analysis_summary"] = {"error": f"Error crítico en hilo: {str(e)}"}
 
-# --- Punto de Entrada (Sin cambios) ---
+
+@app.route('/analyze/<task_id>', methods=['POST'])
+def analyze_tickets_route(task_id):
+    if task_id not in tasks_status:
+        return jsonify({"error": "ID de tarea no válido."}), 404
+    
+    task_info = tasks_status[task_id]
+
+    if task_info["status"] == "processing":
+         return jsonify({"message": "El análisis ya está en progreso para esta tarea.", "task_id": task_id}), 409
+
+    custom_context = request.form.get('custom_context', '')
+    desc_col = request.form.get('description_column', DEFAULT_COLUMNS_TO_ANALYZE['description_column'])
+    short_desc_col = request.form.get('short_description_column', DEFAULT_COLUMNS_TO_ANALYZE['short_description_column'])
+    work_notes_col = request.form.get('work_notes_column', DEFAULT_COLUMNS_TO_ANALYZE.get('work_notes_column', "Work notes"))
+    
+    ollama_model_selected = request.form.get('ollama_model_select', OLLAMA_MODEL)
+
+    selected_columns = {
+        "description_column": desc_col,
+        "short_description_column": short_desc_col,
+        "work_notes_column": work_notes_col
+    }
+
+    filepath_on_server = task_info["filepath_on_server"]
+    temp_filename_base = task_info["temp_filename_base"]
+
+    task_info["status"] = "queued"
+    task_info["message"] = "Análisis en cola..."
+    task_info["progress_current"] = 0
+    task_info["progress_total"] = 1 
+    task_info["processed_filepath_on_server"] = None
+    task_info["analysis_summary"] = None
+    tasks_status[task_id] = task_info
+
+    thread = threading.Thread(target=analysis_thread_target, args=(
+        task_id,
+        filepath_on_server,
+        temp_filename_base,
+        custom_context,
+        selected_columns,
+        ollama_model_selected
+    ))
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({"message": "Análisis iniciado.", "task_id": task_id}), 202
+
+@app.route('/status/<task_id>', methods=['GET'])
+def get_status(task_id):
+    if task_id not in tasks_status:
+        return jsonify({"error": "ID de tarea no válido."}), 404
+    return jsonify(tasks_status[task_id])
+
+@app.route('/download/<task_id>', methods=['GET'])
+def download_processed_file(task_id):
+    task_info = tasks_status.get(task_id)
+    if not task_info or task_info["status"] != "completed":
+        return jsonify({"error": "El archivo no está listo o la tarea no fue completada exitosamente."}), 404
+
+    processed_filepath_on_server = task_info.get("processed_filepath_on_server")
+    if not processed_filepath_on_server or not os.path.exists(processed_filepath_on_server):
+        return jsonify({"error": "Archivo procesado no encontrado en el sistema."}), 404
+
+    original_filename = task_info.get("original_filename", "descarga.xlsx")
+    base_orig, ext_orig = os.path.splitext(original_filename)
+    download_filename = f"{base_orig}_analizado{ext_orig}"
+
+    return send_from_directory(
+        directory=os.path.dirname(processed_filepath_on_server),
+        path=os.path.basename(processed_filepath_on_server),
+        as_attachment=True,
+        download_name=download_filename
+    )
+
 if __name__ == '__main__':
-    print("Iniciando servidor Flask...")
-    app.run(host='0.0.0.0', port=5000, debug=False) # debug=False recomendado
+    try:
+        response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=10)
+        response.raise_for_status()
+        print(f"Ollama parece estar respondiendo en {OLLAMA_BASE_URL}")
+    except requests.exceptions.RequestException as e:
+        print(f"ADVERTENCIA: No se pudo conectar a Ollama en {OLLAMA_BASE_URL} o la respuesta fue un error. Detalle: {str(e)[:200]}")
+    
+    app.run(debug=True, host='0.0.0.0', port=5001)

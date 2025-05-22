@@ -1,6 +1,5 @@
 // static/script.js
 document.addEventListener('DOMContentLoaded', function() {
-    // ... (código inicial y listeners de uploadForm sin cambios respecto a la versión anterior con logs) ...
     console.log("SCRIPT.JS: DOM completamente cargado y procesado.");
 
     const uploadForm = document.getElementById('uploadForm');
@@ -22,17 +21,18 @@ document.addEventListener('DOMContentLoaded', function() {
     let pollInterval = null;
 
     if (!uploadForm) console.error("SCRIPT.JS: Elemento uploadForm NO encontrado.");
-    // ... (otras comprobaciones de elementos)
+    if (!uploadButton) console.error("SCRIPT.JS: Elemento uploadButton NO encontrado.");
+    if (!analyzeButton) console.error("SCRIPT.JS: Elemento analyzeButton NO encontrado.");
+    if (!fileInput) console.error("SCRIPT.JS: Elemento fileInput NO encontrado.");
+    if (!statusMessage) console.error("SCRIPT.JS: Elemento statusMessage NO encontrado.");
 
-    // --- Listener para el formulario de subida ---
+
     if (uploadForm) {
-        // ... (el listener de uploadForm se mantiene igual que en la versión anterior con todos los logs)
         console.log("SCRIPT.JS: Adjuntando event listener a uploadForm.");
         uploadForm.addEventListener('submit', async function(event) {
             event.preventDefault(); 
             console.log("SCRIPT.JS: Evento 'submit' de uploadForm CAPTURADO y PREVENIDO.");
             
-            console.log("SCRIPT.JS: Llamando a resetUI (parcial).");
             if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
             currentTaskId = null;
             if(progressBar) { progressBar.style.width = '0%'; progressBar.textContent = '0%'; }
@@ -89,7 +89,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         analyzeButton.disabled = false;
                     }
                 } else {
-                    // ... (manejo de error de subida)
                     if(statusMessage) {
                         statusMessage.textContent = `Error al subir: ${data.error || 'Error desconocido del servidor'}`;
                         statusMessage.className = 'status-message error';
@@ -101,7 +100,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     if(progressArea) progressArea.style.display = 'block';
                 }
             } catch (error) {
-                // ... (manejo de error de fetch)
                 console.error('SCRIPT.JS: Error en fetch /upload:', error);
                 if(statusMessage) {
                     statusMessage.textContent = 'Error de red o al procesar la subida del archivo.';
@@ -115,24 +113,32 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     } else {
-        console.error("SCRIPT.JS: No se pudo adjuntar el event listener a uploadForm.");
+        console.error("SCRIPT.JS: No se pudo adjuntar el event listener a uploadForm porque el FORMULARIO no se encontró.");
     }
 
-
-    // --- Listener para el botón de Análisis ---
     if (analyzeButton) {
         analyzeButton.addEventListener('click', async function() {
             console.log("SCRIPT.JS: Botón 'Analizar Tickets' clickeado.");
-            if (!currentTaskId) { /* ... */ return; }
+            if (!currentTaskId) {
+                if(statusMessage) {
+                    statusMessage.textContent = 'Error: No hay tarea activa para analizar.';
+                    statusMessage.className = 'status-message error';
+                }
+                return;
+            }
 
             analyzeButton.disabled = true;
             analyzeButton.textContent = 'Analizando...';
-            // ... (resetear UI para análisis) ...
-            if(statusMessage) { statusMessage.textContent = 'Iniciando análisis...'; statusMessage.className = 'status-message info';}
+            if(statusMessage) {
+                statusMessage.textContent = 'Iniciando análisis...';
+                statusMessage.className = 'status-message info';
+            }
             if(downloadLink) downloadLink.innerHTML = '';
             if(analysisSummaryDiv) analysisSummaryDiv.innerHTML = '';
-            if(progressBar) { progressBar.style.width = '0%'; progressBar.textContent = '0%';}
-
+            if(progressBar) {
+                progressBar.style.width = '0%';
+                progressBar.textContent = '0%';
+            }
 
             const analysisFormData = new FormData();
             analysisFormData.append('custom_context', document.getElementById('custom_context').value);
@@ -140,18 +146,25 @@ document.addEventListener('DOMContentLoaded', function() {
             analysisFormData.append('short_description_column', document.getElementById('short_description_column').value);
             analysisFormData.append('work_notes_column', document.getElementById('work_notes_column').value);
             
-            // 'categories' YA NO SE ENVÍA
-            
             let selectedModel = ollamaModelSelect.value;
             if (selectedModel === "otro_modelo_personalizado") {
                 selectedModel = ollamaModelCustomInput.value.trim();
-                if (!selectedModel) { /* ... (manejo de error modelo custom) ... */ return; }
+                if (!selectedModel) {
+                    if(statusMessage){
+                        statusMessage.textContent = 'Error: Debes especificar un nombre para "Otro modelo".';
+                        statusMessage.className = 'status-message error';
+                    }
+                    if(analyzeButton){
+                        analyzeButton.disabled = false;
+                        analyzeButton.textContent = '2. Analizar Tickets';
+                    }
+                    return;
+                }
             }
             analysisFormData.append('ollama_model_select', selectedModel);
             console.log("SCRIPT.JS: Enviando para análisis con modelo:", selectedModel);
 
             try {
-                // ... (código de fetch /analyze y manejo de respuesta, igual que antes) ...
                 const response = await fetch(`/analyze/${currentTaskId}`, {
                     method: 'POST',
                     body: analysisFormData
@@ -164,7 +177,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (pollInterval) clearInterval(pollInterval); 
                     pollInterval = setInterval(() => pollStatus(currentTaskId), 2000); 
                 } else {
-                    // ... (manejo de error al iniciar análisis)
                     if(statusMessage) {
                         statusMessage.textContent = `Error al iniciar análisis: ${data.error || 'Error desconocido del servidor'}`;
                         statusMessage.className = 'status-message error';
@@ -175,7 +187,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }
             } catch (error) {
-                // ... (manejo de error de fetch /analyze)
                 console.error('SCRIPT.JS: Error en fetch /analyze:', error);
                 if(statusMessage) {
                     statusMessage.textContent = 'Error de red al iniciar el análisis.';
@@ -188,51 +199,66 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     } else {
-         console.error("SCRIPT.JS: No se pudo adjuntar el event listener a analyzeButton.");
+         console.error("SCRIPT.JS: No se pudo adjuntar el event listener a analyzeButton porque el BOTÓN no se encontró.");
     }
 
-    // --- Función de Polling (sin cambios en su lógica interna) ---
     async function pollStatus(taskId) {
-        // ... (código de pollStatus se mantiene igual que en la versión anterior)
         try {
             const response = await fetch(`/status/${taskId}`);
             const data = await response.json();
 
-            if (!response.ok) { /* ... (manejo error API status) ... */ return; }
+            if (!response.ok) {
+                console.error('SCRIPT.JS: Error al obtener estado (API /status):', data.error);
+                if(statusMessage) {
+                    statusMessage.textContent = `Error al obtener estado: ${data.error || 'Respuesta no OK del servidor'}`;
+                    statusMessage.className = 'status-message error';
+                }
+                return;
+            }
             
             if(statusMessage) statusMessage.textContent = data.message || "Procesando...";
-            // ... (actualizar progress bar)
             let progress = 0;
-            if (data.progress_total > 0) { progress = (data.progress_current / data.progress_total) * 100; }
-            if(progressBar) { progressBar.style.width = `${progress}%`; progressBar.textContent = `${Math.round(progress)}%`; }
-
+            if (data.progress_total > 0) {
+                progress = (data.progress_current / data.progress_total) * 100;
+            }
+            if(progressBar) {
+                progressBar.style.width = `${progress}%`;
+                progressBar.textContent = `${Math.round(progress)}%`;
+            }
 
             if (data.status === 'completed') {
-                // ... (manejo de completado, igual que antes, incluyendo fileInput.value = '')
                 if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
                 if(progressBar) { progressBar.style.width = '100%'; progressBar.textContent = '100%'; }
                 if(statusMessage) { statusMessage.textContent = data.message || 'Análisis completado.'; statusMessage.className = 'status-message info'; }
                 if(downloadLink) downloadLink.innerHTML = `<a href="/download/${taskId}" class="button" style="background-color: #28a745; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px;">Descargar Resultados</a>`;
+                
                 if(uploadButton) { uploadButton.style.display = 'inline-block'; uploadButton.disabled = false; uploadButton.textContent = '1. Subir Otro Archivo'; }
                 if(analyzeButton) { analyzeButton.textContent = '2. Analizar de Nuevo'; analyzeButton.disabled = false; }
                 if(fileInput) fileInput.value = ''; 
+                
                 displayAnalysisSummary(data.analysis_summary);
 
             } else if (data.status === 'error') {
-                // ... (manejo de error, igual que antes)
                 if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
                 if(statusMessage) { statusMessage.textContent = `Error: ${data.message || 'Fallo en el análisis.'}`; statusMessage.className = 'status-message error'; }
+                
                 if(uploadButton) { uploadButton.style.display = 'inline-block'; uploadButton.disabled = false; uploadButton.textContent = '1. Subir Otro Archivo'; }
                 if(analyzeButton) { analyzeButton.textContent = '2. Intentar Análisis de Nuevo'; analyzeButton.disabled = false; }
+                
                 displayAnalysisSummary(data.analysis_summary);
             } else { 
                  if(statusMessage) statusMessage.className = 'status-message info';
             }
 
-        } catch (error) { /* ... (manejo error red pollStatus) ... */ }
+        } catch (error) {
+            console.error('SCRIPT.JS: Error de red en pollStatus:', error);
+            if(statusMessage) {
+                statusMessage.textContent = 'Error de red al obtener estado. Reintentando...';
+                statusMessage.className = 'status-message error';
+            }
+        }
     }
     
-    // --- Mostrar Resumen del Análisis (MODIFICADO para mostrar nuevas columnas) ---
     function displayAnalysisSummary(summary) {
         if (!analysisSummaryDiv) return;
         analysisSummaryDiv.innerHTML = '';
@@ -251,16 +277,12 @@ document.addEventListener('DOMContentLoaded', function() {
         html += `<p><strong>Modelo LLM utilizado:</strong> ${summary.ollama_model_used || 'No especificado'}</p>`;
         html += `<p><strong>Contexto personalizado proporcionado:</strong> ${summary.custom_context_provided ? 'Sí' : 'No'}</p>`;
         
-        // Mostrar las columnas generadas por la IA
         if (summary.columns_generated_by_ia && summary.columns_generated_by_ia.length > 0) {
             html += `<p><strong>Columnas generadas por IA en el Excel:</strong> ${summary.columns_generated_by_ia.join(', ')}</p>`;
         }
 
-        // 'categories_source_message' y 'categories_used_for_classification' ya no son relevantes aquí
-        // porque la clasificación es ahora una de las columnas generadas.
-
         if (summary.category_counts && Object.keys(summary.category_counts).length > 0) {
-            html += `<h4>Distribución de "Clasificacion_Sugerida_IA":</h4><ul>`; // Título más específico
+            html += `<h4>Distribución de "Clasificacion_Sugerida_IA":</h4><ul>`;
             for (const category in summary.category_counts) {
                 html += `<li>${category}: ${summary.category_counts[category]}</li>`;
             }
@@ -280,9 +302,7 @@ document.addEventListener('DOMContentLoaded', function() {
         analysisSummaryDiv.innerHTML = html;
     }
 
-    // --- Manejo del selector de modelo Ollama (sin cambios) ---
     if (ollamaModelSelect) {
-        // ... (código del listener de ollamaModelSelect sin cambios)
         ollamaModelSelect.addEventListener('change', function() {
             if (this.value === "otro_modelo_personalizado") {
                 if(ollamaModelCustomInput) ollamaModelCustomInput.style.display = 'block';

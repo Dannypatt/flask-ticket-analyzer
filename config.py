@@ -2,43 +2,34 @@
 import psutil
 
 # --- Ollama Configuration ---
-OLLAMA_BASE_URL = "http://localhost:11434"  # Asegúrate que Ollama esté corriendo aquí
-OLLAMA_MODEL = "gemma3"  # Modelo por defecto, puedes cambiarlo (e.g., "llama3", "mistral")
-# OLLAMA_MODEL = "mistral:latest"
-# OLLAMA_MODEL = "llama3:latest"
+OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_MODEL = "gemma:2b"  # Modelo por defecto, puedes cambiarlo
 
 # --- Processing Configuration ---
-# Columnas principales a considerar para el análisis. El usuario podrá seleccionar en la UI.
 DEFAULT_COLUMNS_TO_ANALYZE = {
     "description_column": "Description",
     "short_description_column": "Short description",
     "work_notes_column": "Work notes"
 }
-# Categorías predefinidas para clasificación. Usadas si no hay contexto o la generación dinámica falla.
+# DEFAULT_CATEGORIES ya no se usa activamente para la clasificación principal,
+# ya que ahora la IA sugiere la clasificación en una columna dedicada.
+# Podría mantenerse por si se quisiera reintroducir alguna lógica de fallback muy específica.
 DEFAULT_CATEGORIES = [
-    "Problema Hardware",
-    "Problema Software",
-    "Gestión de Cuentas",
-    "Solicitud de Software",
-    "Problema de Red",
-    "Problema de Aplicación Interna",
-    "Consulta General",
-    "Seguridad Informática",
-    "Otro"
+    "Problema Hardware", "Problema Software", "Gestión de Cuentas",
+    "Solicitud de Software", "Problema de Red", "Otro"
 ]
 
+
 # --- System Configuration ---
-# Usar todos los cores lógicos disponibles para el ThreadPoolExecutor
 MAX_WORKERS = psutil.cpu_count(logical=True)
-# MAX_WORKERS = 2 # Para pruebas
+# MAX_WORKERS = 1 # Reduce para pruebas si Ollama se satura
 
 # --- File Management ---
 UPLOAD_FOLDER = 'uploads'
 PROCESSED_FOLDER = 'processed'
-MAX_FILE_AGE_SECONDS = 24 * 60 * 60  # 1 día para limpieza de archivos antiguos
+MAX_FILE_AGE_SECONDS = 24 * 60 * 60  # 1 día
 
 # --- HTML Cleaning & Identifier Filtering ---
-# Regex para identificadores a excluir del análisis
 IDENTIFIER_PATTERNS_TO_EXCLUDE = [
     r"\[ARGONAUTA.*?\]",
     r"\[INC\d+\]",
